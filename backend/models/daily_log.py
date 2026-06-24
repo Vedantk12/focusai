@@ -80,8 +80,6 @@ class DailyLog:
             score += 15
         elif self.sleep_hours < 7:
             score += 7
-        elif self.sleep_hours < 8:
-            score += 3      
         
         # Low mood is correlated with overuse
         # mood_score is 1-10, lower is worse
