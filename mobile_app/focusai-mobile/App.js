@@ -1,5 +1,4 @@
 import React from 'react';
-import { LogBox } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -13,15 +12,11 @@ import RegisterScreen   from './src/screens/RegisterScreen';
 import DashboardScreen  from './src/screens/DashboardScreen';
 import LogScreen        from './src/screens/LogScreen';
 import HistoryScreen    from './src/screens/HistoryScreen';
-
-LogBox.ignoreLogs([
-  'InteractionManager has been deprecated',
-]);
+import CalendarScreen   from './src/screens/CalendarScreen';
 
 const Stack = createStackNavigator();
 const Tab   = createBottomTabNavigator();
 
-// Bottom tab navigator — shown after login
 function MainTabs() {
   return (
     <Tab.Navigator
@@ -37,34 +32,35 @@ function MainTabs() {
         },
         tabBarActiveTintColor:   colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
-        tabBarIcon: ({ focused, color, size }) => {
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
+        tabBarIcon: ({ focused, color }) => {
           const icons = {
-            Dashboard: focused ? 'home'         : 'home-outline',
-            Log:       focused ? 'add-circle'   : 'add-circle-outline',
-            History:   focused ? 'bar-chart'    : 'bar-chart-outline',
+            Dashboard: focused ? 'home'           : 'home-outline',
+            Calendar:  focused ? 'calendar'       : 'calendar-outline',
+            Log:       focused ? 'add-circle'     : 'add-circle-outline',
+            History:   focused ? 'bar-chart'      : 'bar-chart-outline',
           };
           return <Ionicons name={icons[route.name]} size={22} color={color} />;
         },
       })}
     >
       <Tab.Screen name="Dashboard" component={DashboardScreen} />
-      <Tab.Screen name="Log"       component={LogScreen} />
-      <Tab.Screen name="History"   component={HistoryScreen} />
+      <Tab.Screen name="Calendar"  component={CalendarScreen}  />
+      <Tab.Screen name="Log"       component={LogScreen}       />
+      <Tab.Screen name="History"   component={HistoryScreen}   />
     </Tab.Navigator>
   );
 }
 
-// Root stack navigator
 export default function App() {
   return (
     <NavigationContainer>
       <StatusBar style="light" />
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-        <Stack.Screen name="Login"      component={LoginScreen} />
-        <Stack.Screen name="Register"   component={RegisterScreen} />
-        <Stack.Screen name="MainTabs"   component={MainTabs} />
+        <Stack.Screen name="Login"      component={LoginScreen}      />
+        <Stack.Screen name="Register"   component={RegisterScreen}   />
+        <Stack.Screen name="MainTabs"   component={MainTabs}         />
       </Stack.Navigator>
     </NavigationContainer>
   );
