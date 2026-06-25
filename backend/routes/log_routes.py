@@ -16,7 +16,9 @@ from sqlalchemy.orm import Session
 
 # Direct imports — no "backend." prefix
 import database as db_module
+from database import get_db
 import auth
+from database import get_db
 from ml_model.scorer import FocusAIScorer
 
 router   = APIRouter(prefix="/logs", tags=["Logs & Scores"])
@@ -29,8 +31,13 @@ scorer   = FocusAIScorer()
 # -------------------------------------------------------
 
 def validate_log_date(log_date_str: Optional[str]) -> date:
-    today     = date.today()
-    yesterday = today - timedelta(days=1)
+    """
+    Allows logging for any day within the last 7 days.
+    This supports the calendar — users can fill in missed days.
+    Future dates still blocked.
+    """
+    today = date.today()
+    seven_days_ago = today - timedelta(days=7)
 
     if log_date_str is None:
         return today
@@ -38,17 +45,23 @@ def validate_log_date(log_date_str: Optional[str]) -> date:
     try:
         requested = date.fromisoformat(log_date_str)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
-
-    if requested == today or requested == yesterday:
-        return requested
-    elif requested > today:
-        raise HTTPException(status_code=400, detail="Cannot log for a future date.")
-    else:
         raise HTTPException(
             status_code=400,
-            detail=f"Only today ({today}) or yesterday ({yesterday}) allowed. {requested} is too old."
+            detail="Invalid date format. Use YYYY-MM-DD."
         )
+
+    if requested > today:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot log for a future date."
+        )
+    elif requested < seven_days_ago:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only log within the last 7 days. {requested} is too old."
+        )
+
+    return requested
 
 
 # -------------------------------------------------------
@@ -217,3 +230,30 @@ def get_log_by_date(
         raise HTTPException(status_code=404, detail=f"No log for {log_date}.")
 
     return db_module.log_to_dict(log)
+
+@router.get("/month/{year}/{month}")
+def get_month_logs(
+    year: int,
+    month: int,
+    current_user = Depends(get_current_user),
+    db: Session  = Depends(get_db)
+):
+    """
+    Returns all logs for a given month for the current user.
+    Used by the calendar heatmap screen.
+    """
+    from sqlalchemy import extract
+    logs = (
+        db.query(DailyLogModel)
+        .filter(
+            DailyLogModel.user_id == current_user.user_id,
+            extract('year',  DailyLogModel.log_date) == year,
+            extract('month', DailyLogModel.log_date) == month
+        )
+        .all()
+    )
+    return {
+        "year":  year,
+        "month": month,
+        "logs":  [log_to_dict(l) for l in logs]
+    }
