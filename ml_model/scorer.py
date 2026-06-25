@@ -16,26 +16,36 @@ class FocusAIScorer:
     
     def __init__(self):
         """Load the trained model and scaler from disk."""
-        
-        model_dir = "ml_model/trained_models"
-        
+
+        BASE_DIR = os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))
+        )
+
+        model_dir = os.path.join(
+            BASE_DIR,
+            "ml_model",
+            "trained_models"
+        )
+
         # Check trained models exist
-        if not os.path.exists(f"{model_dir}/risk_model.pkl"):
+        model_file = os.path.join(model_dir, "risk_model.pkl")
+
+        if not os.path.exists(model_file):
             raise FileNotFoundError(
-                "Trained model not found. Run: python ml_model/train_model.py"
+                f"Trained model not found: {model_file}"
             )
-        
+
         # Load all three saved files
-        with open(f"{model_dir}/risk_model.pkl", "rb") as f:
+        with open(os.path.join(model_dir, "risk_model.pkl"), "rb") as f:
             self.model = pickle.load(f)
-        
-        with open(f"{model_dir}/scaler.pkl", "rb") as f:
+
+        with open(os.path.join(model_dir, "scaler.pkl"), "rb") as f:
             self.scaler = pickle.load(f)
-        
-        with open(f"{model_dir}/feature_columns.pkl", "rb") as f:
+
+        with open(os.path.join(model_dir, "feature_columns.pkl"), "rb") as f:
             self.feature_columns = pickle.load(f)
-        
-        print("FocusAI Scorer loaded successfully")
+
+    print("FocusAI Scorer loaded successfully")
     
     def predict_risk(self, daily_log_data: dict) -> float:
         """
