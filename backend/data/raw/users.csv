@@ -1,0 +1,2 @@
+user_id,name,email,hashed_password,age,occupation,created_at
+40809202-e248-4ca6-9212-c4418776e683,Vedant K,vedant19@gmail.com,$5$rounds=535000$cwtz7zL7rl5GRHzw$HzkuMywQx3sUPbTlQ6BCjWHNz29DgCpc4.XYl0P/YsD,21,student,2026-06-24T23:41:12.500684

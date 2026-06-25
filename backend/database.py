@@ -1,193 +1,210 @@
-# database.py
-# Handles all reading and writing of data to CSV files.
-# This is our "database" for now — simple but functional.
-# In Phase 6 we'll replace this with PostgreSQL.
+# database.py — SQLite + SQLAlchemy
+# Place this file at: C:\Users\vedan\focusai\backend\database.py
 
-import pandas as pd
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 
-# Where all data files live
-DATA_DIR = "data/raw"
+from sqlalchemy import (
+    create_engine, Column, String, Float,
+    Integer, DateTime, Date, UniqueConstraint
+)
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
-# File paths
-USERS_FILE      = f"{DATA_DIR}/users.csv"
-LOGS_FILE       = f"{DATA_DIR}/daily_logs.csv"
-SESSIONS_FILE   = f"{DATA_DIR}/sessions.csv"
+# Absolute path — works regardless of startup directory
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH  = os.path.join(BASE_DIR, "data", "focusai.db")
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
-# Column definitions — ensures consistent structure
-USER_COLUMNS = [
-    "user_id", "name", "email",
-    "hashed_password", "age", "occupation", "created_at"
-]
-
-LOG_COLUMNS = [
-    "log_id", "user_id", "log_date",
-    "screen_time_hours", "social_media_hours", "gaming_hours",
-    "study_hours", "sleep_hours", "mood_score", "productivity_score",
-    "notifications_checked", "outside_time_minutes",
-    "addiction_risk_score", "focus_score", "productivity_score_ai"
-]
+engine = create_engine(
+    f"sqlite:///{DB_PATH}",
+    connect_args={"check_same_thread": False},
+    echo=False
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
 
-def _ensure_files_exist():
-    """Create CSV files with headers if they don't exist yet."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    
-    if not os.path.exists(USERS_FILE):
-        pd.DataFrame(columns=USER_COLUMNS).to_csv(USERS_FILE, index=False)
-    
-    if not os.path.exists(LOGS_FILE):
-        pd.DataFrame(columns=LOG_COLUMNS).to_csv(LOGS_FILE, index=False)
+# -------------------------------------------------------
+# TABLE DEFINITIONS
+# -------------------------------------------------------
+
+class UserModel(Base):
+    __tablename__ = "users"
+
+    user_id         = Column(String,  primary_key=True)
+    name            = Column(String,  nullable=False)
+    email           = Column(String,  nullable=False, unique=True, index=True)
+    hashed_password = Column(String,  nullable=False)
+    age             = Column(Integer, nullable=False)
+    occupation      = Column(String,  nullable=False)
+    created_at      = Column(DateTime, default=datetime.utcnow)
 
 
-# --- USER OPERATIONS ---
+class DailyLogModel(Base):
+    __tablename__ = "daily_logs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "log_date", name="uq_user_date"),
+    )
 
-def get_user_by_email(email: str):
-    """
-    Looks up a user by their email address.
-    Returns a dict if found, None if not found.
-    """
-    _ensure_files_exist()
-    df = pd.read_csv(USERS_FILE)
-    
-    # Boolean mask: creates a True/False series for each row
-    match = df[df['email'] == email]
-    
-    if match.empty:
-        return None
-    
-    # .iloc[0] gets the first matching row
-    # .to_dict() converts it to a regular Python dict
-    return match.iloc[0].to_dict()
-
-
-def get_user_by_id(user_id: str):
-    """Looks up a user by their ID."""
-    _ensure_files_exist()
-    df = pd.read_csv(USERS_FILE)
-    match = df[df['user_id'] == user_id]
-    
-    if match.empty:
-        return None
-    return match.iloc[0].to_dict()
+    log_id                = Column(String,  primary_key=True)
+    user_id               = Column(String,  nullable=False, index=True)
+    log_date              = Column(Date,    nullable=False, index=True)
+    screen_time_hours     = Column(Float,   nullable=False)
+    social_media_hours    = Column(Float,   nullable=False)
+    gaming_hours          = Column(Float,   nullable=False)
+    study_hours           = Column(Float,   nullable=False)
+    sleep_hours           = Column(Float,   nullable=False)
+    mood_score            = Column(Integer, nullable=False)
+    productivity_score    = Column(Integer, nullable=False)
+    notifications_checked = Column(Integer, nullable=False)
+    outside_time_minutes  = Column(Integer, nullable=False)
+    addiction_risk_score  = Column(Float)
+    focus_score           = Column(Float)
+    productivity_score_ai = Column(Float)
+    risk_category         = Column(String)
+    created_at            = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at            = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-def create_user(name: str, email: str, hashed_password: str,
-                age: int, occupation: str) -> dict:
-    """
-    Creates a new user record and saves it to CSV.
-    Returns the created user dict.
-    """
-    _ensure_files_exist()
-    
-    new_user = {
-        "user_id":         str(uuid.uuid4()),
-        "name":            name,
-        "email":           email,
-        "hashed_password": hashed_password,
-        "age":             age,
-        "occupation":      occupation,
-        "created_at":      datetime.now().isoformat()
-    }
-    
-    df = pd.read_csv(USERS_FILE)
-    
-    # pd.concat joins two DataFrames together vertically
-    new_row = pd.DataFrame([new_user])
-    df = pd.concat([df, new_row], ignore_index=True)
-    df.to_csv(USERS_FILE, index=False)
-    
-    return new_user
+# -------------------------------------------------------
+# INIT
+# -------------------------------------------------------
 
-def create_user(name, email, hashed_password, age, occupation):
-    _ensure_files_exist()
-    
-    new_user = {
-        "user_id":         str(uuid.uuid4()),
-        "name":            name,
-        "email":           email,
-        "hashed_password": hashed_password,
-        "age":             age,
-        "occupation":      occupation,
-        "created_at":      datetime.now().isoformat()
-    }
-    
-    df = pd.read_csv(USERS_FILE)
-    
-    # ADD THIS LINE temporarily to debug
-    print(f"DEBUG: Saving user {email}, hash starts with: {hashed_password[:10]}")
-    
-    new_row = pd.DataFrame([new_user])
-    df = pd.concat([df, new_row], ignore_index=True)
-    df.to_csv(USERS_FILE, index=False)
-    
-    return new_user
-
-def email_exists(email: str) -> bool:
-    """Check if an email is already registered."""
-    return get_user_by_email(email) is not None
+def init_db():
+    Base.metadata.create_all(bind=engine)
+    print(f"[DB] SQLite ready: {DB_PATH}")
 
 
-# --- LOG OPERATIONS ---
-
-def save_log(log_data: dict) -> dict:
-    """
-    Saves a daily log entry to CSV.
-    log_data should include scores already calculated.
-    """
-    _ensure_files_exist()
-    
-    log_data['log_id'] = str(uuid.uuid4())
-    log_data['log_date'] = datetime.now().date().isoformat()
-    
-    df = pd.read_csv(LOGS_FILE)
-    new_row = pd.DataFrame([log_data])
-    df = pd.concat([df, new_row], ignore_index=True)
-    df.to_csv(LOGS_FILE, index=False)
-    
-    return log_data
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
-def get_logs_for_user(user_id: str, limit: int = 30) -> list:
-    """
-    Returns the most recent `limit` logs for a user.
-    """
-    _ensure_files_exist()
-    df = pd.read_csv(LOGS_FILE)
-    
-    # Filter for this user only
-    user_logs = df[df['user_id'] == user_id]
-    
-    # Sort by date, most recent first
-    if not user_logs.empty and 'log_date' in user_logs.columns:
-        user_logs = user_logs.sort_values('log_date', ascending=False)
-    
-    # Return as list of dicts, limited to `limit` entries
-    return user_logs.head(limit).to_dict(orient='records')
+# -------------------------------------------------------
+# USER FUNCTIONS
+# -------------------------------------------------------
+
+def get_user_by_email(db: Session, email: str):
+    return db.query(UserModel).filter(UserModel.email == email).first()
 
 
-def get_latest_scores(user_id: str) -> dict:
-    """Returns the most recent scores for a user."""
-    logs = get_logs_for_user(user_id, limit=1)
-    
-    if not logs:
-        return None
-    
-    latest = logs[0]
+def get_user_by_id(db: Session, user_id: str):
+    return db.query(UserModel).filter(UserModel.user_id == user_id).first()
+
+
+def email_exists(db: Session, email: str) -> bool:
+    return get_user_by_email(db, email) is not None
+
+
+def create_user(db: Session, name, email, hashed_password, age, occupation):
+    user = UserModel(
+        user_id         = str(uuid.uuid4()),
+        name            = name,
+        email           = email,
+        hashed_password = hashed_password,
+        age             = age,
+        occupation      = occupation
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def user_to_dict(user: UserModel) -> dict:
     return {
-        "addiction_risk_score":  latest.get("addiction_risk_score", 0),
-        "focus_score":           latest.get("focus_score", 0),
-        "productivity_score_ai": latest.get("productivity_score_ai", 0),
-        "log_date":              latest.get("log_date", ""),
-        "risk_category":         _get_category(latest.get("addiction_risk_score", 0))
+        "user_id":    user.user_id,
+        "name":       user.name,
+        "email":      user.email,
+        "age":        user.age,
+        "occupation": user.occupation,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
 
-def _get_category(score) -> str:
-    score = float(score) if score else 0
-    if score < 25:   return "Low"
-    if score < 50:   return "Moderate"
-    if score < 75:   return "High"
-    return "Critical"
+# -------------------------------------------------------
+# LOG FUNCTIONS
+# -------------------------------------------------------
+
+def get_log_by_user_and_date(db: Session, user_id: str, log_date: date):
+    return (
+        db.query(DailyLogModel)
+        .filter(
+            DailyLogModel.user_id  == user_id,
+            DailyLogModel.log_date == log_date
+        )
+        .first()
+    )
+
+
+def get_latest_log(db: Session, user_id: str):
+    return (
+        db.query(DailyLogModel)
+        .filter(DailyLogModel.user_id == user_id)
+        .order_by(DailyLogModel.log_date.desc())
+        .first()
+    )
+
+
+def get_logs_for_user(db: Session, user_id: str, limit: int = 30):
+    return (
+        db.query(DailyLogModel)
+        .filter(DailyLogModel.user_id == user_id)
+        .order_by(DailyLogModel.log_date.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def upsert_log(db: Session, user_id: str, log_date: date, log_data: dict):
+    """
+    Creates a new log OR updates the existing one for (user_id, log_date).
+    Returns (log, was_created).
+    """
+    existing = get_log_by_user_and_date(db, user_id, log_date)
+
+    if existing is None:
+        record = DailyLogModel(
+            log_id   = str(uuid.uuid4()),
+            user_id  = user_id,
+            log_date = log_date,
+            **log_data
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record, True
+    else:
+        for k, v in log_data.items():
+            setattr(existing, k, v)
+        existing.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(existing)
+        return existing, False
+
+
+def log_to_dict(log: DailyLogModel) -> dict:
+    return {
+        "log_id":                log.log_id,
+        "user_id":               log.user_id,
+        "log_date":              log.log_date.isoformat(),
+        "screen_time_hours":     log.screen_time_hours,
+        "social_media_hours":    log.social_media_hours,
+        "gaming_hours":          log.gaming_hours,
+        "study_hours":           log.study_hours,
+        "sleep_hours":           log.sleep_hours,
+        "mood_score":            log.mood_score,
+        "productivity_score":    log.productivity_score,
+        "notifications_checked": log.notifications_checked,
+        "outside_time_minutes":  log.outside_time_minutes,
+        "addiction_risk_score":  log.addiction_risk_score,
+        "focus_score":           log.focus_score,
+        "productivity_score_ai": log.productivity_score_ai,
+        "risk_category":         log.risk_category,
+        "created_at":            log.created_at.isoformat() if log.created_at else None,
+        "updated_at":            log.updated_at.isoformat() if log.updated_at else None,
+    }

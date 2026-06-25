@@ -1,60 +1,74 @@
 # log_routes.py
-# Endpoints for submitting daily logs and retrieving scores.
 
 import sys
 import os
-
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from datetime import date, timedelta
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from backend import database, auth
+# Direct imports — no "backend." prefix
+import database as db_module
+import auth
 from ml_model.scorer import FocusAIScorer
 
-router = APIRouter(prefix="/logs", tags=["Logs & Scores"])
-
-# Load ML scorer once when server starts
-scorer = FocusAIScorer()
-
-# HTTPBearer tells FastAPI to expect "Bearer <token>" in the
-# Authorization header. This also makes Swagger UI handle it correctly.
+router   = APIRouter(prefix="/logs", tags=["Logs & Scores"])
 security = HTTPBearer()
+scorer   = FocusAIScorer()
 
 
 # -------------------------------------------------------
-# HELPER: Verify token and return current user
+# DATE VALIDATION
 # -------------------------------------------------------
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """
-    FastAPI automatically extracts the Bearer token from the
-    Authorization header and passes it here via Depends().
-    
-    Depends() is FastAPI's dependency injection system —
-    it runs this function before the endpoint function,
-    and passes the result in as a parameter.
-    """
-    token = credentials.credentials  # Just the token, no "Bearer " prefix
+def validate_log_date(log_date_str: Optional[str]) -> date:
+    today     = date.today()
+    yesterday = today - timedelta(days=1)
 
+    if log_date_str is None:
+        return today
+
+    try:
+        requested = date.fromisoformat(log_date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    if requested == today or requested == yesterday:
+        return requested
+    elif requested > today:
+        raise HTTPException(status_code=400, detail="Cannot log for a future date.")
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only today ({today}) or yesterday ({yesterday}) allowed. {requested} is too old."
+        )
+
+
+# -------------------------------------------------------
+# AUTH DEPENDENCY
+# -------------------------------------------------------
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(db_module.get_db)
+):
+    token   = credentials.credentials
     payload = auth.decode_token(token)
-
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token is invalid or expired. Please log in again."
+            detail="Token invalid or expired. Please log in again."
         )
-
-    user = database.get_user_by_id(str(payload["user_id"]))
+    user = db_module.get_user_by_id(db, str(payload["user_id"]))
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found."
-        )
-
+        raise HTTPException(status_code=404, detail="User not found.")
     return user
 
 
@@ -63,6 +77,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 # -------------------------------------------------------
 
 class DailyLogRequest(BaseModel):
+    log_date:              Optional[str] = None
     screen_time_hours:     float
     social_media_hours:    float
     gaming_hours:          float
@@ -78,93 +93,127 @@ class DailyLogRequest(BaseModel):
 # ENDPOINTS
 # -------------------------------------------------------
 
+@router.get("/check")
+def check_log_exists(
+    log_date:    Optional[str] = None,
+    current_user = Depends(get_current_user),
+    db: Session  = Depends(db_module.get_db)
+):
+    validated_date = validate_log_date(log_date)
+    existing = db_module.get_log_by_user_and_date(db, current_user.user_id, validated_date)
+
+    if existing:
+        return {
+            "exists":   True,
+            "log_date": validated_date.isoformat(),
+            "log":      db_module.log_to_dict(existing)
+        }
+    return {
+        "exists":   False,
+        "log_date": validated_date.isoformat(),
+        "log":      None
+    }
+
+
 @router.post("/submit")
 def submit_log(
-    request: DailyLogRequest,
-    current_user: dict = Depends(get_current_user)
+    request:     DailyLogRequest,
+    current_user = Depends(get_current_user),
+    db: Session  = Depends(db_module.get_db)
 ):
-    """
-    Accepts daily behavior data, runs ML model, saves and returns scores.
-    This is the core endpoint of FocusAI.
-    """
+    validated_date = validate_log_date(request.log_date)
 
-    # Build log dict for scorer
+    behavioral = {
+        "screen_time_hours":     request.screen_time_hours,
+        "social_media_hours":    request.social_media_hours,
+        "gaming_hours":          request.gaming_hours,
+        "study_hours":           request.study_hours,
+        "sleep_hours":           request.sleep_hours,
+        "mood_score":            request.mood_score,
+        "productivity_score":    request.productivity_score,
+        "notifications_checked": request.notifications_checked,
+        "outside_time_minutes":  request.outside_time_minutes,
+    }
+
+    result = scorer.score_user(behavioral)
+
     log_data = {
-        'screen_time_hours':     request.screen_time_hours,
-        'social_media_hours':    request.social_media_hours,
-        'gaming_hours':          request.gaming_hours,
-        'study_hours':           request.study_hours,
-        'sleep_hours':           request.sleep_hours,
-        'mood_score':            request.mood_score,
-        'productivity_score':    request.productivity_score,
-        'notifications_checked': request.notifications_checked,
-        'outside_time_minutes':  request.outside_time_minutes
+        **behavioral,
+        "addiction_risk_score":  result["scores"]["addiction_risk_score"],
+        "focus_score":           result["scores"]["focus_score"],
+        "productivity_score_ai": result["scores"]["productivity_score"],
+        "risk_category":         result["risk_category"],
     }
 
-    # Run through ML model
-    result = scorer.score_user(log_data)
-
-    # Build full record to save
-    record = {
-        **log_data,
-        'user_id':               current_user['user_id'],
-        'addiction_risk_score':  result['scores']['addiction_risk_score'],
-        'focus_score':           result['scores']['focus_score'],
-        'productivity_score_ai': result['scores']['productivity_score']
-    }
-
-    database.save_log(record)
+    log, was_created = db_module.upsert_log(
+        db,
+        user_id  = current_user.user_id,
+        log_date = validated_date,
+        log_data = log_data
+    )
 
     return {
-        "message":         "Log submitted successfully.",
-        "user":            current_user['name'],
-        "scores":          result['scores'],
-        "risk_category":   result['risk_category'],
-        "recommendations": result['recommendations']
+        "message":         "Log created." if was_created else "Log updated.",
+        "was_updated":     not was_created,
+        "log":             db_module.log_to_dict(log),
+        "scores":          result["scores"],
+        "risk_category":   result["risk_category"],
+        "recommendations": result["recommendations"]
     }
 
 
 @router.get("/scores/{user_id}")
 def get_scores(
-    user_id: str,
-    current_user: dict = Depends(get_current_user)
+    user_id:     str,
+    current_user = Depends(get_current_user),
+    db: Session  = Depends(db_module.get_db)
 ):
-    """Returns the most recent scores for a user."""
+    if current_user.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied.")
 
-    if str(current_user['user_id']) != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only view your own scores."
-        )
+    log = db_module.get_latest_log(db, user_id)
+    if not log:
+        raise HTTPException(status_code=404, detail="No logs found.")
 
-    scores = database.get_latest_scores(user_id)
-
-    if not scores:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No logs found. Submit a daily log first."
-        )
-
-    return scores
+    return {
+        "addiction_risk_score":  log.addiction_risk_score,
+        "focus_score":           log.focus_score,
+        "productivity_score_ai": log.productivity_score_ai,
+        "risk_category":         log.risk_category,
+        "log_date":              log.log_date.isoformat()
+    }
 
 
 @router.get("/history/{user_id}")
 def get_history(
-    user_id: str,
-    current_user: dict = Depends(get_current_user)
+    user_id:     str,
+    current_user = Depends(get_current_user),
+    db: Session  = Depends(db_module.get_db)
 ):
-    """Returns the last 30 daily logs for a user."""
+    if current_user.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied.")
 
-    if str(current_user['user_id']) != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only view your own history."
-        )
-
-    logs = database.get_logs_for_user(user_id, limit=30)
-
+    logs = db_module.get_logs_for_user(db, user_id, limit=30)
     return {
         "user_id":   user_id,
         "log_count": len(logs),
-        "logs":      logs
+        "logs":      [db_module.log_to_dict(l) for l in logs]
     }
+
+
+@router.get("/date/{log_date}")
+def get_log_by_date(
+    log_date:    str,
+    current_user = Depends(get_current_user),
+    db: Session  = Depends(db_module.get_db)
+):
+    try:
+        requested_date = date.fromisoformat(log_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Use YYYY-MM-DD format.")
+
+    log = db_module.get_log_by_user_and_date(db, current_user.user_id, requested_date)
+    if not log:
+        raise HTTPException(status_code=404, detail=f"No log for {log_date}.")
+
+    return db_module.log_to_dict(log)
