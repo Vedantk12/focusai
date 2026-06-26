@@ -66,7 +66,7 @@ export default function DashboardScreen({ navigation }) {
           <Text style={styles.greeting}>{greeting()},</Text>
           <Text style={styles.userName}>{user?.name || 'User'} 👋</Text>
         </View>
-        <TouchableOpacity style={styles.logButton} onPress={() => navigation.navigate('Log')}>
+        <TouchableOpacity style={styles.logButton} onPress={() => navigation.navigate('Calendar', { screen: 'Log', params: { preselectedDate: new Date().toISOString().slice(0, 10) } })}>
           <LinearGradient
             colors={[colors.gradientStart, colors.gradientEnd]}
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
@@ -159,7 +159,7 @@ export default function DashboardScreen({ navigation }) {
           </Text>
           <TouchableOpacity
             style={styles.emptyButton}
-            onPress={() => navigation.navigate('Log')}
+            onPress={() => navigation.navigate('Calendar', { screen: 'Log', params: { preselectedDate: new Date().toISOString().slice(0, 10) } })}
           >
             <LinearGradient
               colors={[colors.gradientStart, colors.gradientEnd]}

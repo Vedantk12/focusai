@@ -16,9 +16,9 @@ from sqlalchemy.orm import Session
 
 # Direct imports — no "backend." prefix
 import database as db_module
-from database import get_db
+from database import get_db, DailyLogModel, log_to_dict
 import auth
-from database import get_db
+from database import get_db, DailyLogModel, log_to_dict
 from ml_model.scorer import FocusAIScorer
 
 router   = APIRouter(prefix="/logs", tags=["Logs & Scores"])
@@ -257,3 +257,5 @@ def get_month_logs(
         "month": month,
         "logs":  [log_to_dict(l) for l in logs]
     }
+
+
