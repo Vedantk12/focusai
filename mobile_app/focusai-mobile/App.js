@@ -5,19 +5,21 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from './src/theme/colors';
-import OnboardingScreen  from './src/screens/OnboardingScreen';
-import LoginScreen       from './src/screens/LoginScreen';
-import RegisterScreen    from './src/screens/RegisterScreen';
-import DashboardScreen   from './src/screens/DashboardScreen';
-import LogScreen         from './src/screens/LogScreen';
-import HistoryScreen     from './src/screens/HistoryScreen';
-import CalendarScreen    from './src/screens/CalendarScreen';
+import OnboardingScreen from './src/screens/OnboardingScreen';
+import LoginScreen      from './src/screens/LoginScreen';
+import RegisterScreen   from './src/screens/RegisterScreen';
+import DashboardScreen  from './src/screens/DashboardScreen';
+import LogScreen        from './src/screens/LogScreen';
+import HistoryScreen    from './src/screens/HistoryScreen';
+import AllLogsScreen    from './src/screens/AllLogsScreen';
+import LogDetailScreen  from './src/screens/LogDetailScreen';
+import CalendarScreen   from './src/screens/CalendarScreen';
 
-const Stack = createStackNavigator();
-const Tab   = createBottomTabNavigator();
-
-// Calendar has its own Stack so tapping a date goes to Log INSIDE calendar tab
+const Stack         = createStackNavigator();
+const Tab           = createBottomTabNavigator();
 const CalendarStack = createStackNavigator();
+const HistoryStack  = createStackNavigator();
+
 function CalendarStackScreen() {
   return (
     <CalendarStack.Navigator screenOptions={{ headerShown: false }}>
@@ -27,18 +29,28 @@ function CalendarStackScreen() {
   );
 }
 
+function HistoryStackScreen() {
+  return (
+    <HistoryStack.Navigator screenOptions={{ headerShown: false }}>
+      <HistoryStack.Screen name="HistoryMain" component={HistoryScreen} />
+      <HistoryStack.Screen name="AllLogs"     component={AllLogsScreen} />
+      <HistoryStack.Screen name="LogDetail"   component={LogDetailScreen} />
+    </HistoryStack.Navigator>
+  );
+}
+
 function MainTabs() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: {
-          backgroundColor:  colors.card,
-          borderTopColor:   colors.cardBorder,
-          borderTopWidth:   1,
-          paddingBottom:    8,
-          paddingTop:       8,
-          height:           64,
+          backgroundColor: colors.card,
+          borderTopColor:  colors.cardBorder,
+          borderTopWidth:  1,
+          paddingBottom:   8,
+          paddingTop:      8,
+          height:          64,
         },
         tabBarActiveTintColor:   colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
@@ -55,7 +67,7 @@ function MainTabs() {
     >
       <Tab.Screen name="Dashboard" component={DashboardScreen} />
       <Tab.Screen name="Calendar"  component={CalendarStackScreen} />
-      <Tab.Screen name="History"   component={HistoryScreen} />
+      <Tab.Screen name="History"   component={HistoryStackScreen} />
     </Tab.Navigator>
   );
 }

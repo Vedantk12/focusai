@@ -1,7 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE_URL = 'http://192.168.1.6:8000';
+const BASE_URL = 'http://10.194.158.89:8000';
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -88,14 +88,6 @@ export const getMonthLogs = async (year, month) => {
   return res.data;
 };
 
-// -------------------------------------------------------
-// STREAK
-// -------------------------------------------------------
-
-export const getStreak = async (userId) => {
-  const res = await api.get(`/logs/streak/${userId}`);
-  return res.data;
-};
 
 // -------------------------------------------------------
 // WEEKLY REPORT
@@ -110,8 +102,8 @@ export const getWeeklyReport = async (userId) => {
 // BURNOUT PREDICTION
 // -------------------------------------------------------
 
-export const getBurnoutPrediction = async (userId) => {
-  const res = await api.get(`/logs/burnout/${userId}`);
+export const getBurnoutPrediction = async () => {
+  const res = await api.get('/logs/burnout');
   return res.data;
 };
 
@@ -233,3 +225,12 @@ export const isServerReachable = async () => {
     return false;
   }
 };
+
+export const getStreak = async () => {
+  const token = await AsyncStorage.getItem('focusai_token');
+  const res   = await axios.get(`${BASE_URL}/logs/streak`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.data;
+};
+

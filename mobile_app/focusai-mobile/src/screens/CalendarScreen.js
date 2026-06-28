@@ -11,7 +11,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
-const BASE_URL = 'http://192.168.1.6:8000'; // same as api.js
+const BASE_URL = 'http://10.194.158.89:8000'; // same as api.js
 
 // ── Risk Color Mapping ─────────────────────────────────
 const getRiskColor = (score) => {
@@ -396,3 +396,4 @@ const S = StyleSheet.create({
   editGradient:    { paddingVertical: 14, alignItems: 'center' },
   editButtonText:  { color: '#fff', fontSize: 15, fontWeight: '700' },
 });
+

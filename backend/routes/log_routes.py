@@ -259,3 +259,423 @@ def get_month_logs(
     }
 
 
+
+
+@router.get("/streak")
+def get_streak(
+    current_user = Depends(get_current_user),
+    db: Session  = Depends(get_db)
+):
+    """
+    Calculates streak, badge type, and promotion status.
+    Gold  = 2+ consecutive days ALL low risk (score < 25)
+    Silver = 2+ consecutive days but inconsistent risk
+    Silver -> Gold promotion = last 7 days all low risk
+    """
+    today = date.today()
+
+    # Fetch last 30 days of logs sorted descending
+    logs = (
+        db.query(DailyLogModel)
+        .filter(DailyLogModel.user_id == current_user.user_id)
+        .order_by(DailyLogModel.log_date.desc())
+        .limit(30)
+        .all()
+    )
+
+    if not logs:
+        return {
+            "streak_days":   0,
+            "badge":         None,
+            "badge_label":   "No streak yet",
+            "promotion_progress": 0,
+            "promotion_target":   7,
+            "message":       "Log 2 days in a row to earn your first badge!"
+        }
+
+    # Build a date->log map
+    log_map = { l.log_date: l for l in logs }
+
+    # Count consecutive days from today backwards
+    streak = 0
+    all_low_risk = True
+    check_date = today
+
+    while check_date in log_map:
+        log = log_map[check_date]
+        streak += 1
+        risk = float(log.addiction_risk_score or 0)
+        if risk >= 25:
+            all_low_risk = False
+        check_date -= timedelta(days=1)
+
+    # No streak if less than 2 consecutive days
+    if streak < 2:
+        return {
+            "streak_days":        streak,
+            "badge":              None,
+            "badge_label":        "Keep going!",
+            "promotion_progress": streak,
+            "promotion_target":   2,
+            "message":            f"Log tomorrow to start your streak! ({streak}/2 days)"
+        }
+
+    # Determine badge
+    if all_low_risk:
+        badge = "gold"
+        badge_label = "Gold Streak"
+        message = f"Amazing! {streak} days of low risk. Keep it up! 🏆"
+        return {
+            "streak_days":        streak,
+            "badge":              badge,
+            "badge_label":        badge_label,
+            "promotion_progress": 7,
+            "promotion_target":   7,
+            "message":            message
+        }
+
+    # Silver badge — check promotion progress (last 7 days all low risk?)
+    promotion_progress = 0
+    for i in range(7):
+        d = today - timedelta(days=i)
+        if d in log_map:
+            risk = float(log_map[d].addiction_risk_score or 0)
+            if risk < 25:
+                promotion_progress += 1
+            else:
+                break
+        else:
+            break
+
+    promoted = promotion_progress >= 7
+
+    if promoted:
+        badge = "gold"
+        badge_label = "Gold Streak"
+        message = f"Promoted to Gold! 7 days of low risk. Incredible! 🥇"
+    else:
+        badge = "silver"
+        badge_label = "Silver Streak"
+        message = f"{7 - promotion_progress} more low-risk days to reach Gold! 🥈"
+
+    return {
+        "streak_days":        streak,
+        "badge":              badge,
+        "badge_label":        badge_label,
+        "promotion_progress": promotion_progress,
+        "promotion_target":   7,
+        "message":            message
+    }
+
+@router.get("/burnout")
+def get_burnout_prediction(
+    current_user = Depends(get_current_user),
+    db: Session  = Depends(get_db)
+):
+    today = date.today()
+    logs = (
+        db.query(DailyLogModel)
+        .filter(DailyLogModel.user_id == current_user.user_id)
+        .order_by(DailyLogModel.log_date.desc())
+        .limit(7)
+        .all()
+    )
+    if len(logs) < 3:
+        return {"status": "insufficient_data", "level": "none", "title": "Not enough data", "message": "Log at least 3 days in a row to get burnout prediction.", "trend": [], "days_at_risk": 0, "advice": []}
+    logs_sorted = sorted(logs, key=lambda l: l.log_date)
+    risks = [float(l.addiction_risk_score or 0) for l in logs_sorted]
+    dates = [l.log_date.strftime("%d/%m") for l in logs_sorted]
+    last3 = risks[-3:]
+    increasing = last3[0] < last3[1] < last3[2]
+    decreasing = last3[0] > last3[1] > last3[2]
+    high_risk_streak = 0
+    for r in reversed(risks):
+        if r >= 75:
+            high_risk_streak += 1
+        else:
+            break
+    moderate_streak = 0
+    for r in reversed(risks):
+        if r >= 50:
+            moderate_streak += 1
+        else:
+            break
+    trend_data = []
+    for i, (d, r) in enumerate(zip(dates, risks)):
+        direction = None
+        if i > 0:
+            diff = r - risks[i-1]
+            direction = "up" if diff > 2 else ("down" if diff < -2 else "stable")
+        trend_data.append({"date": d, "risk": round(r, 1), "direction": direction})
+    if high_risk_streak >= 3:
+        return {"status": "burnout_warning", "level": "critical", "title": "Burnout Warning!", "message": f"Your risk has been critically high for {high_risk_streak} days in a row. Immediate action needed.", "trend": trend_data, "days_at_risk": high_risk_streak, "advice": ["Take a complete digital detox day", "Sleep at least 8 hours tonight", "Spend 30+ minutes outside", "Limit social media to 30 min tomorrow", "Talk to someone you trust"]}
+    if increasing and last3[2] >= 50:
+        rise = round(last3[2] - last3[0], 1)
+        return {"status": "risk_rising", "level": "warning", "title": "Risk Trending Up", "message": f"Your risk score has risen {rise} points over 3 days. Take action before it gets worse.", "trend": trend_data, "days_at_risk": 3, "advice": ["Reduce screen time by 1 hour tomorrow", "No phones 1 hour before bed", "Take a 15-min walk after meals", "Turn off non-essential notifications"]}
+    if moderate_streak >= 3:
+        return {"status": "sustained_moderate", "level": "caution", "title": "Sustained Moderate Risk", "message": f"{moderate_streak} days of moderate risk. Small changes now prevent burnout later.", "trend": trend_data, "days_at_risk": moderate_streak, "advice": ["Set a daily screen time limit", "Schedule one screen-free hour per day", "Prioritize 7-8 hours of sleep"]}
+    if decreasing and last3[2] < last3[0]:
+        drop = round(last3[0] - last3[2], 1)
+        return {"status": "improving", "level": "good", "title": "You are Improving!", "message": f"Risk dropped {drop} points in 3 days. Keep up the great work!", "trend": trend_data, "days_at_risk": 0, "advice": ["Keep your current routine going", "Maintain your sleep schedule", "You are doing great, stay consistent!"]}
+    return {"status": "stable", "level": "stable", "title": "Risk is Stable", "message": "No burnout risk detected. Keep logging daily to stay on track.", "trend": trend_data, "days_at_risk": 0, "advice": ["Keep logging daily", "Maintain your current habits"]}
+
+@router.get("/burnout")
+def get_burnout_prediction(
+    current_user = Depends(get_current_user),
+    db: Session  = Depends(get_db)
+):
+    """
+    Burnout prediction based on last 7 days trend.
+    - BURNOUT WARNING  : risk increasing 3+ consecutive days
+    - HIGH RISK ALERT  : risk >= 75 for 3+ consecutive days  
+    - IMPROVING        : risk decreasing 3+ consecutive days
+    - STABLE           : no clear trend
+    """
+    today = date.today()
+
+    logs = (
+        db.query(DailyLogModel)
+        .filter(DailyLogModel.user_id == current_user.user_id)
+        .order_by(DailyLogModel.log_date.desc())
+        .limit(7)
+        .all()
+    )
+
+    if len(logs) < 3:
+        return {
+            "status":      "insufficient_data",
+            "level":       "none",
+            "title":       "Not enough data",
+            "message":     "Log at least 3 days in a row to get burnout prediction.",
+            "trend":       [],
+            "days_at_risk": 0,
+            "advice":      []
+        }
+
+    # Sort oldest to newest
+    logs_sorted = sorted(logs, key=lambda l: l.log_date)
+    risks = [float(l.addiction_risk_score or 0) for l in logs_sorted]
+    dates = [l.log_date.strftime('%d/%m') for l in logs_sorted]
+
+    # Check consecutive increase (last 3 days)
+    last3 = risks[-3:]
+    increasing = last3[0] < last3[1] < last3[2]
+    decreasing = last3[0] > last3[1] > last3[2]
+
+    # Count consecutive high risk days from today backwards
+    high_risk_streak = 0
+    for r in reversed(risks):
+        if r >= 75:
+            high_risk_streak += 1
+        else:
+            break
+
+    # Count consecutive moderate+ days
+    moderate_streak = 0
+    for r in reversed(risks):
+        if r >= 50:
+            moderate_streak += 1
+        else:
+            break
+
+    # Calculate trend direction
+    trend_data = []
+    for i, (d, r) in enumerate(zip(dates, risks)):
+        direction = None
+        if i > 0:
+            diff = r - risks[i-1]
+            direction = 'up' if diff > 2 else ('down' if diff < -2 else 'stable')
+        trend_data.append({ 'date': d, 'risk': round(r, 1), 'direction': direction })
+
+    # Determine status
+    if high_risk_streak >= 3:
+        return {
+            "status":       "burnout_warning",
+            "level":        "critical",
+            "title":        "?? Burnout Warning!",
+            "message":      f"Your risk has been critically high for {high_risk_streak} days in a row. Immediate action needed.",
+            "trend":        trend_data,
+            "days_at_risk": high_risk_streak,
+            "advice": [
+                "Take a complete digital detox day",
+                "Sleep at least 8 hours tonight",
+                "Spend 30+ minutes outside",
+                "Limit social media to 30 min tomorrow",
+                "Talk to someone you trust"
+            ]
+        }
+
+    if increasing and last3[2] >= 50:
+        rise = round(last3[2] - last3[0], 1)
+        return {
+            "status":       "risk_rising",
+            "level":        "warning",
+            "title":        "?? Risk Trending Up",
+            "message":      f"Your risk score has risen {rise} points over 3 days. Take action before it gets worse.",
+            "trend":        trend_data,
+            "days_at_risk": 3,
+            "advice": [
+                "Reduce screen time by 1 hour tomorrow",
+                "No phones 1 hour before bed",
+                "Take a 15-min walk after meals",
+                "Turn off non-essential notifications"
+            ]
+        }
+
+    if moderate_streak >= 3:
+        return {
+            "status":       "sustained_moderate",
+            "level":        "caution",
+            "title":        "?? Sustained Moderate Risk",
+            "message":      f"{moderate_streak} days of moderate risk. Small changes now prevent burnout later.",
+            "trend":        trend_data,
+            "days_at_risk": moderate_streak,
+            "advice": [
+                "Set a daily screen time limit",
+                "Schedule one screen-free hour per day",
+                "Prioritize 7-8 hours of sleep"
+            ]
+        }
+
+    if decreasing and last3[2] < last3[0]:
+        drop = round(last3[0] - last3[2], 1)
+        return {
+            "status":       "improving",
+            "level":        "good",
+            "title":        "?? You're Improving!",
+            "message":      f"Risk dropped {drop} points in 3 days. Keep up the great work!",
+            "trend":        trend_data,
+            "days_at_risk": 0,
+            "advice": [
+                "Keep your current routine going",
+                "Maintain your sleep schedule",
+                "You're doing great � stay consistent!"
+            ]
+        }
+
+    return {
+        "status":       "stable",
+        "level":        "stable",
+        "title":        "? Risk is Stable",
+        "message":      "No burnout risk detected. Keep logging daily to stay on track.",
+        "trend":        trend_data,
+        "days_at_risk": 0,
+        "advice":       ["Keep logging daily", "Maintain your current habits"]
+    }
+
+@router.get("/burnout")
+def get_burnout_prediction(
+    current_user = Depends(get_current_user),
+    db: Session  = Depends(get_db)
+):
+    today = date.today()
+    logs = (
+        db.query(DailyLogModel)
+        .filter(DailyLogModel.user_id == current_user.user_id)
+        .order_by(DailyLogModel.log_date.desc())
+        .limit(7)
+        .all()
+    )
+    if len(logs) < 3:
+        return {
+            "status": "insufficient_data",
+            "level": "none",
+            "title": "Not enough data",
+            "message": "Log at least 3 days to get burnout prediction.",
+            "trend": [], "days_at_risk": 0, "advice": []
+        }
+
+    logs_sorted = sorted(logs, key=lambda l: l.log_date)
+    risks = [float(l.addiction_risk_score or 0) for l in logs_sorted]
+    dates = [l.log_date.strftime("%d/%m") for l in logs_sorted]
+
+    last3 = risks[-3:]
+    increasing = last3[0] < last3[1] < last3[2]
+    decreasing = last3[0] > last3[1] > last3[2]
+
+    high_risk_streak = 0
+    for r in reversed(risks):
+        if r >= 75:
+            high_risk_streak += 1
+        else:
+            break
+
+    moderate_streak = 0
+    for r in reversed(risks):
+        if r >= 50:
+            moderate_streak += 1
+        else:
+            break
+
+    trend_data = []
+    for i, (d, r) in enumerate(zip(dates, risks)):
+        direction = None
+        if i > 0:
+            diff = r - risks[i-1]
+            direction = "up" if diff > 2 else ("down" if diff < -2 else "stable")
+        trend_data.append({"date": d, "risk": round(r, 1), "direction": direction})
+
+    if high_risk_streak >= 3:
+        return {
+            "status": "burnout_warning", "level": "critical",
+            "title": "Burnout Warning!",
+            "message": f"Risk critically high for {high_risk_streak} days. Immediate action needed.",
+            "trend": trend_data, "days_at_risk": high_risk_streak,
+            "advice": [
+                "Take a complete digital detox day",
+                "Sleep at least 8 hours tonight",
+                "Spend 30+ minutes outside",
+                "Limit social media to 30 min tomorrow",
+                "Talk to someone you trust"
+            ]
+        }
+
+    if increasing and last3[2] >= 50:
+        rise = round(last3[2] - last3[0], 1)
+        return {
+            "status": "risk_rising", "level": "warning",
+            "title": "Risk Trending Up",
+            "message": f"Risk rose {rise} points over 3 days. Act before it gets worse.",
+            "trend": trend_data, "days_at_risk": 3,
+            "advice": [
+                "Reduce screen time by 1 hour tomorrow",
+                "No phones 1 hour before bed",
+                "Take a 15-min walk after meals",
+                "Turn off non-essential notifications"
+            ]
+        }
+
+    if moderate_streak >= 3:
+        return {
+            "status": "sustained_moderate", "level": "caution",
+            "title": "Sustained Moderate Risk",
+            "message": f"{moderate_streak} days of moderate risk. Small changes now prevent burnout.",
+            "trend": trend_data, "days_at_risk": moderate_streak,
+            "advice": [
+                "Set a daily screen time limit",
+                "Schedule one screen-free hour per day",
+                "Prioritize 7-8 hours of sleep"
+            ]
+        }
+
+    if decreasing and last3[2] < last3[0]:
+        drop = round(last3[0] - last3[2], 1)
+        return {
+            "status": "improving", "level": "good",
+            "title": "You are Improving!",
+            "message": f"Risk dropped {drop} points in 3 days. Keep it up!",
+            "trend": trend_data, "days_at_risk": 0,
+            "advice": [
+                "Keep your current routine going",
+                "Maintain your sleep schedule",
+                "You are doing great, stay consistent!"
+            ]
+        }
+
+    return {
+        "status": "stable", "level": "stable",
+        "title": "Risk is Stable",
+        "message": "No burnout risk detected. Keep logging daily.",
+        "trend": trend_data, "days_at_risk": 0,
+        "advice": ["Keep logging daily", "Maintain your current habits"]
+    }
